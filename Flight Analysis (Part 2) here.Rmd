@@ -1,0 +1,865 @@
+---
+title: "R code for Part 2"
+author: ''
+date: "2024-01-30"
+---
+
+# SRN: 
+
+## ST2195 Coursework Part 2 R code
+
+### Setting up libraries and work directory
+```{r}
+library(dplyr)                       #For data manipulation
+library(reshape2)                    #To transform data from wide to long and vice versa
+library(lubridate)                   #To work with dates and time
+library(ggplot2)                     #For plotting graphs
+library(mlr3)                        #Machine learning package
+library(mlr3learners)                #Choosing logistic regression
+library(mlr3pipelines)               #For pipeline operation
+#### Set working directory to source file location
+```
+
+### Reading datasets of 1999 to 2008 and other information from the Harvard Dataverse
+```{r}
+data1 <- read.csv("1999.csv", header = TRUE)
+data2 <- read.csv("2000.csv", header = TRUE)           
+data3 <- read.csv("2001.csv", header = TRUE)  
+data4 <- read.csv("2002.csv", header = TRUE)
+data5 <- read.csv("2003.csv", header = TRUE)
+data6 <- read.csv("2004.csv", header = TRUE)
+data7 <- read.csv("2005.csv", header = TRUE) 
+data8 <- read.csv("2006.csv", header = TRUE)
+data9 <- read.csv("2007.csv", header = TRUE)
+data10 <- read.csv("2008.csv", header = TRUE)
+```
+
+```{r}
+ontime_df <- rbind(data1, data2, data3, data4, data5, data6, data7, data8, data9, data10)    #Binding all 10 years into 1 dataframe
+
+airports_df <- read.csv("airports.csv", header = TRUE)
+
+carriers_df <- read.csv("carriers.csv", header = TRUE)
+
+planes_df <- read.csv("plane-data.csv", header = TRUE)
+
+variable_df <- read.csv("variable-descriptions.csv", header = TRUE)
+```
+
+### Showing data  
+```{r}
+print(ontime_df)
+print(airports_df)
+print(carriers_df)
+print(planes_df)
+print(variable_df)
+```
+
+### Data cleaning for ontime_df
+```{r}
+ontime_df <- ontime_df %>% 
+  select(Year, Month, DayofMonth, DayOfWeek, DepTime, CRSDepTime, CRSArrTime, UniqueCarrier, TailNum, ArrDelay, DepDelay, Origin, Dest, Distance, Cancelled, Diverted)          #Selecting necessary columns first to reduce memory error
+
+
+ontime_df <- ontime_df %>% mutate(Date = make_date(Year, Month, DayofMonth))    #Making 'Date' from Year, Month, DayofMonth
+```
+
+```{r}
+ontime_df <- ontime_df %>% mutate(TotalDelay = ArrDelay + DepDelay)   #Delays are interpretated as ArrDelay and DepDelay
+```
+
+```{r}
+ontime_df <- ontime_df %>% 
+  select(Year, DayOfWeek, DepTime, CRSDepTime, CRSArrTime, UniqueCarrier, TailNum, Origin, Dest, Distance, Cancelled, Diverted, Date, TotalDelay) 
+#Further reducing the columns
+``` 
+
+```{r}
+print(ontime_df)   
+#cleaned ontime_df that we will use for Part 2
+```
+
+
+### Creating new ontime_df for Part 2a)
+```{r}
+p2aontime_df <- copy(ontime_df)                   #Copying ontime_df so that we do not disturb the original data
+```
+
+```{r}
+p2aontime_df <- na.omit(p2aontime_df)       #Clearing NA values
+sum(is.na(p2aontime_df))                    #Checking that there is no NA values left
+```
+
+```{r}
+print(p2aontime_df)
+```
+
+#### For best time:
+```{r}
+p2aontime_df$TimeStamp <- paste(p2aontime_df$Date, p2aontime_df$DepTime, sep = " ") #Creating TimeStamp column for categorisation in the following codes
+p2aontime_df$TimeStamp <- ymd_hm(p2aontime_df$TimeStamp)
+```
+
+```{r}
+Hour <- hour(hm("00:00", "6:00", "12:00", "18:00", "23:59"))
+Stage <- c("Night", "Morning", "Afternoon", "Evening")                    #Categorising day into 4 stages to find the best times
+p2aontime_df$DateandTime <- cut(x=hour(p2aontime_df$TimeStamp), breaks = Hour, labels = Stage, include.lowest = TRUE)
+```
+
+#### For best day:
+```{r}
+DayOfWeekdays <- function(day) {
+  weekdays <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")   
+  return(weekdays[day])              
+}                                    #Changing 1-7 to Monday-Sunday. Can be inferred from variable_df
+p2aontime_df$DayOfWeek <- sapply(p2aontime_df$DayOfWeek, DayOfWeekdays)
+```
+
+```{r}
+p2aontime_df <- p2aontime_df %>% 
+  select(Year, DayOfWeek, DepTime, CRSDepTime, CRSArrTime, UniqueCarrier, TailNum, TotalDelay, Origin, Dest, Distance, Cancelled, Diverted, TimeStamp,
+         DateandTime, Date)            #Selecting the final columns needed
+```
+
+```{r}
+p2aontime_df <- na.omit(p2aontime_df)
+sum(is.na(p2aontime_df))                    #Confirming that there's no NA values
+```
+
+```{r}
+print(p2aontime_df)      #Final data used for Part 2a)
+```
+
+### Part 2a) What are the best times and days of the week to minimise delays each year?
+#### Minimising delay means delay has occurred, and we will be taking the lowest value. It will be defined by TotalDelay>0. It is a norm to think that delay means late departure and late arrival, thus we will sum them up. >0 as a positive value indicates delay while a negative number indicates no delay. 
+
+#### Best Times of the week to minimise delays each year:
+```{r}
+best_times <- p2aontime_df %>%
+  filter(Year == 1999) %>%       #Filter by year
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%   #No cancellation, no diversion
+  group_by(DateandTime) %>%           #Categorisation of the day
+  summarise(avg_delay = mean(TotalDelay)) %>%      #Summarising it by average delay
+  arrange(avg_delay)                             #Arranging it by ascending order of the average delay
+
+ggplot(best_times, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 1999")
+
+print(best_times)
+
+#We will repeat this for the rest of the years
+```
+
+```{r}
+best_times2 <- p2aontime_df %>%
+  filter(Year == 2000) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay) 
+
+ggplot(best_times2, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2000")
+
+print(best_times2)
+```
+
+```{r}
+best_times3 <- p2aontime_df %>%
+  filter(Year == 2001) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_times3, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2001")
+
+print(best_times3)
+```
+
+```{r}
+best_times4 <- p2aontime_df %>%
+  filter(Year == 2002) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay) 
+
+ggplot(best_times4, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2002")
+
+print(best_times4)
+```
+
+```{r}
+best_times5 <- p2aontime_df %>%
+  filter(Year == 2003) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay) 
+
+ggplot(best_times5, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2003")
+
+print(best_times5)
+```
+
+```{r}
+best_times6 <- p2aontime_df %>%
+  filter(Year == 2004) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay) 
+
+ggplot(best_times6, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2004")
+
+print(best_times6)
+```
+
+```{r}
+best_times7 <- p2aontime_df %>%
+  filter(Year == 2005) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_times7, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2005")
+
+print(best_times7)
+```
+
+```{r}
+best_times8 <- p2aontime_df %>%
+  filter(Year == 2006) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay) 
+
+ggplot(best_times8, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2006")
+
+print(best_times8)
+```
+
+```{r}
+best_times9 <- p2aontime_df %>%
+  filter(Year == 2007) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_times9, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2007")
+
+print(best_times9)
+```
+
+```{r}
+best_times10 <- p2aontime_df %>%
+  filter(Year == 2008) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DateandTime) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_times10, aes(x = DateandTime, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Times", y = "Average Delay", title = "Best Time of the Week to Minimise Delays in 2008")
+
+print(best_times10)
+```
+
+#### Best Days of the week to minimise delays each year:
+```{r}
+best_day <- p2aontime_df %>%        
+  filter(Year == 1999) %>%                                          #Similar codes as 'best times', but instead of 'DateandTime', it will be replaced by 'DayOfWeek'
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%       #No cancellation, no diversion
+  group_by(DayOfWeek) %>%     #Monday to Sunday
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 1999")
+
+print(best_day)
+
+#We will repeat this for the rest of the years
+```
+
+```{r}
+best_day2 <- p2aontime_df %>%
+  filter(Year == 2000) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day2, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2000")
+
+print(best_day2)
+```
+
+```{r}
+best_day3 <- p2aontime_df %>%
+  filter(Year == 2001) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day3, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2001")
+
+print(best_day3)
+```
+
+```{r}
+best_day4 <- p2aontime_df %>%
+  filter(Year == 2002) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day4, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2002")
+
+print(best_day4)
+```
+
+```{r}
+best_day5 <- p2aontime_df %>%
+  filter(Year == 2003) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day5, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2003")
+
+print(best_day5)
+```
+
+```{r}
+best_day6 <- p2aontime_df %>%
+  filter(Year == 2004) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day6, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2004")
+
+print(best_day6)
+```
+
+
+```{r}
+best_day7 <- p2aontime_df %>%
+  filter(Year == 2005) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day7, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2005")
+
+print(best_day7)
+```
+
+```{r}
+best_day8 <- p2aontime_df %>%
+  filter(Year == 2006) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day8, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2006")
+
+print(best_day8)
+```
+
+```{r}
+best_day9 <- p2aontime_df %>%
+  filter(Year == 2007) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day9, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2007")
+
+print(best_day9)
+```
+
+```{r}
+best_day10 <- p2aontime_df %>%
+  filter(Year == 2008) %>%
+  filter(Cancelled == 0 & Diverted == 0 & TotalDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(TotalDelay)) %>%
+  arrange(avg_delay)
+
+ggplot(best_day10, aes(x = DayOfWeek, y = avg_delay)) +
+  geom_bar(stat = "identity", fill = "deepskyblue4") +
+  labs(x = "Days", y = "Average Delay", title = "Best Day of the Week to Minimise Delays in 2008")
+
+print(best_day10)
+```
+
+
+### Part 2b) Evaluate whether older planes suffer more delays on a year-to-year basis.
+
+#### Data Cleaning for planes_df
+```{r}
+planes_df[planes_df == ""] <- NA                #Replacing blank cells with NA before removing it
+
+planes_df <- na.omit(planes_df)
+
+print(planes_df)
+```
+
+#### Creating new dataframe for Part 2b)
+```{r}
+older_planes_suffer <- ontime_df %>%
+  select(Year, TailNum, TotalDelay) %>%                                  #"TailNum" = "tailnum" as both dataframes contains different column names
+  left_join(planes_df %>% select(tailnum, year), by = c("TailNum" = "tailnum"))
+
+print(older_planes_suffer)                 #year is the manufacturing year, while Year is the date
+```
+
+
+```{r}
+older_planes_suffer <- na.omit(older_planes_suffer)
+sum(is.na(older_planes_suffer))                                   #Removing NA values
+```
+
+```{r}
+range(older_planes_suffer$year)      #Finding the range of manufacturing year so that it can be categorised into Newer and Older planes
+```
+
+```{r}
+older_planes_suffer <- older_planes_suffer %>%
+  filter(year != "0000" & year != "None")           #Filtering out "0000" and "None" as it doesn't make sense to be part of the manufacturing year
+
+range(older_planes_suffer$year)
+```
+
+```{r}
+threshold <- 1998  #Planes that are 10 years old and less from the manufacturing year is considered as New. Eg, 1998-2008: New / Less than 1998: Old
+older_planes_suffer <- older_planes_suffer %>% mutate(YearCategory = ifelse(year < threshold, "Older", "Newer"))
+
+print(older_planes_suffer)
+```
+
+
+```{r}
+p2b <- older_planes_suffer %>%
+  filter(TotalDelay > 0) %>%                          #'More Delays' meaning that there are delays, thus 'TotalDelay' > 0
+  group_by(Year, YearCategory) %>%
+  summarise(avg_delay = mean(TotalDelay), .groups = "drop") %>%    #.groups = 'drop' to remove message
+  arrange(avg_delay)
+
+ggplot(p2b, aes(x = Year, y = avg_delay, color = YearCategory)) +                             #Plotting the graph
+  geom_line() +
+  labs(x = "Year Category", y = "Average Delay", title = "Average Delay on Newer and Older Planes")
+
+print(p2b)
+```
+
+### Part 2c) Fit a logistic regression model for the probability of diverted US flights for each year. Visualize the coefficients across years.
+#### Data Cleaning
+```{r}
+logistic_regression_model <- ontime_df %>%
+  select(Year, Diverted, Date, CRSDepTime, CRSArrTime, Distance, UniqueCarrier, Origin, Dest) %>%           #To select necessary columns
+  left_join(airports_df, by = c("Origin" = "iata")) %>%
+  left_join(airports_df, by = c("Dest" = "iata"))
+                                                      #Leftjoin ontime_df and airports by their iata codes so that we can join the coordinates
+print(logistic_regression_model)
+```
+
+```{r}
+logistic_regression_model <- logistic_regression_model %>%
+  rename(Lat_Origin = lat.x,
+         Long_Origin = long.x,
+         Lat_Dest = lat.y,                       #Renaming columns so that it's easier to read
+         Long_Dest = long.y)
+
+logistic_regression_model <- logistic_regression_model %>%
+  select(Year, Diverted, Date, CRSDepTime, CRSArrTime, Distance, UniqueCarrier, Lat_Origin, Long_Origin, Lat_Dest, Long_Dest)
+#Selecting necessary final columns
+
+logistic_regression_model$BinaryforCarrier <- ifelse(logistic_regression_model$UniqueCarrier == 'US', 1, 0)     #Since the question asked for US, we set US as 1 and others as 0
+```
+
+```{r}
+print(logistic_regression_model)
+```
+
+```{r}
+diverted_rows <- logistic_regression_model[logistic_regression_model$Diverted == 1, ]
+print(diverted_rows)       #Making sure that there is diversion in the data
+```
+
+```{r}
+logistic_regression_model$Diverted <- factor(logistic_regression_model$Diverted)                  #Factoring for variables with different levels
+logistic_regression_model$UniqueCarrier <- factor(logistic_regression_model$BinaryforCarrier)
+logistic_regression_model$Date <- as.integer(logistic_regression_model$Date) #Change structure to integer to fit assertion on feature types
+```
+
+
+```{r}
+model1 <- logistic_regression_model %>%
+  filter(Year == 1999)                 #Filtering for 1 year at a time
+
+n <- nrow(model1)
+training_set <- sample(n, round(0.5*n))           #Setting training and testing set, where half of the data will be used for training and the other half will be used for testing
+testing_set <- setdiff(1:n, training_set)
+
+#Setting up the task
+task1 <- TaskClassif$new('model1', backend=model1, target = 'Diverted')                          
+task1$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))   #Select features column
+measure <- msr('classif.ce')                         #To measure the classification error
+task1 
+
+#Logisitc Regression
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task1, row_ids = training_set)                  #only taking those rows set in the training set 
+glrn_LR$predict(task1, row_ids = testing_set)$score()
+
+#To calculate coefficients
+logit1 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model1, family = binomial(link = "logit"))
+
+coef1 <- coef(logit1)
+coef1
+#Repeat this for the rest of the years
+```
+
+
+```{r}
+model2 <- logistic_regression_model %>%
+  filter(Year == 2000)
+
+n <- nrow(model2)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task2 <- TaskClassif$new('model2', backend=model2, target = 'Diverted')
+task2$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task2 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task2, row_ids = training_set)
+glrn_LR$predict(task2, row_ids = testing_set)$score()
+
+logit2 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model2, family = binomial(link = "logit"))
+
+coef2 <- coef(logit2)
+coef2
+```
+
+```{r}
+model3 <- logistic_regression_model %>%
+  filter(Year == 2001)
+
+n <- nrow(model3)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task3 <- TaskClassif$new('model3', backend=model3, target = 'Diverted')
+task3$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task3 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task3, row_ids = training_set)
+glrn_LR$predict(task3, row_ids = testing_set)$score()
+
+logit3 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model3, family = binomial(link = "logit"))
+
+coef3 <- coef(logit3)
+coef3
+```
+
+```{r}
+model4 <- logistic_regression_model %>%
+  filter(Year == 2002)
+
+n <- nrow(model4)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task4 <- TaskClassif$new('model4', backend=model4, target = 'Diverted')
+task4$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task4 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task4, row_ids = training_set)
+glrn_LR$predict(task4, row_ids = testing_set)$score()
+ 
+logit4 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model4, family = binomial(link = "logit"))
+
+coef4 <- coef(logit4)
+coef4
+```
+
+```{r}
+model5 <- logistic_regression_model %>%
+  filter(Year == 2003)
+
+n <- nrow(model5)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task5 <- TaskClassif$new('model5', backend=model5, target = 'Diverted')
+task5$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task5 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task5, row_ids = training_set)
+glrn_LR$predict(task5, row_ids = testing_set)$score()
+ 
+logit5 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model5, family = binomial(link = "logit"))
+
+coef5 <- coef(logit5)
+coef5
+```
+
+```{r}
+model6 <- logistic_regression_model %>%
+  filter(Year == 2004)
+
+n <- nrow(model6)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task6 <- TaskClassif$new('model6', backend=model6, target = 'Diverted')
+task6$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task6 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task6, row_ids = training_set)
+glrn_LR$predict(task6, row_ids = testing_set)$score()
+ 
+logit6 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model6, family = binomial(link = "logit"))
+
+coef6 <- coef(logit6)
+coef6
+```
+
+```{r}
+model7 <- logistic_regression_model %>%
+  filter(Year == 2005)
+
+n <- nrow(model7)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task7 <- TaskClassif$new('model7', backend=model7, target = 'Diverted')
+task7$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task7 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task7, row_ids = training_set)
+glrn_LR$predict(task7, row_ids = testing_set)$score()
+ 
+logit7 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model7, family = binomial(link = "logit"))
+
+coef7 <- coef(logit7)
+coef7
+```
+
+```{r}
+model8 <- logistic_regression_model %>%
+  filter(Year == 2006)
+
+n <- nrow(model8)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task8 <- TaskClassif$new('model8', backend=model8, target = 'Diverted')
+task8$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task8 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task8, row_ids = training_set)
+glrn_LR$predict(task8, row_ids = testing_set)$score()
+ 
+logit8 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model8, family = binomial(link = "logit"))
+
+coef8 <- coef(logit8)
+coef8
+```
+
+```{r}
+model9 <- logistic_regression_model %>%
+  filter(Year == 2007)
+
+n <- nrow(model9)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task9 <- TaskClassif$new('model9', backend=model9, target = 'Diverted')
+task9$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task9 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task9, row_ids = training_set)
+glrn_LR$predict(task9, row_ids = testing_set)$score()
+ 
+logit9 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model9, family = binomial(link = "logit"))
+
+coef9 <- coef(logit9)
+coef9
+```
+
+```{r}
+model10 <- logistic_regression_model %>%
+  filter(Year == 2008)
+
+n <- nrow(model10)
+training_set <- sample(n, round(0.5*n))
+testing_set <- setdiff(1:n, training_set)
+
+task10 <- TaskClassif$new('model10', backend=model10, target = 'Diverted')
+task10$select(c('Date', 'CRSDepTime', 'CRSArrTime', 'Distance', 'BinaryforCarrier', 'Lat_Origin', 'Long_Origin', 'Lat_Dest', 'Long_Dest'))  
+measure <- msr('classif.ce')
+task10 
+
+learner_LR <- lrn("classif.log_reg")
+gc_lr <- po('imputemean') %>>%
+  po(learner_LR)
+glrn_LR <- GraphLearner$new(gc_lr)
+
+glrn_LR$train(task10, row_ids = training_set)
+glrn_LR$predict(task10, row_ids = testing_set)$score()
+ 
+logit10 <- glm(Diverted ~ Date + CRSDepTime + CRSArrTime + Distance + BinaryforCarrier + Lat_Origin + Long_Origin + Lat_Dest + Long_Dest, data = model10, family = binomial(link = "logit"))
+
+coef10 <- coef(logit10)
+coef10
+```
+
+```{r}
+coef1_numeric <- as.numeric(coef1)   #Only taking the numeric values of the coefficients
+coef2_numeric <- as.numeric(coef2)
+coef3_numeric <- as.numeric(coef3)
+coef4_numeric <- as.numeric(coef4)
+coef5_numeric <- as.numeric(coef5)
+coef6_numeric <- as.numeric(coef6)
+coef7_numeric <- as.numeric(coef7)
+coef8_numeric <- as.numeric(coef8)
+coef9_numeric <- as.numeric(coef9)
+coef10_numeric <- as.numeric(coef10)
+```
+
+```{r}
+predictors = c("Intercept", "Date", "CRSDepTime", "CRSArrTime", "Distance", "UniqueCarriers", "Lat_Origin", "Long_Origin", "Lat_Dest", "Long_Dest") 
+#Creating a column of the features as Predictor as the heading
+
+coefficients_df <- data.frame(
+  Predictor = predictors,
+  Model1999 = coef1_numeric,              #Put all the coefficients and features into a dataframe for plotting
+  Model2000 = coef2_numeric,
+  Model2001 = coef3_numeric,
+  Model2002 = coef4_numeric,
+  Model2003 = coef5_numeric,
+  Model2004 = coef6_numeric,
+  Model2005 = coef7_numeric,
+  Model2006 = coef8_numeric,
+  Model2007 = coef9_numeric,
+  Model2008 = coef10_numeric
+)
+
+coefficients_df <- coefficients_df[-1, ]  #Remove 'Intercept' row
+
+coefficients_melted <- melt(coefficients_df, id.vars = "Predictor")        #Reshaping the data from a long to wide format, so that each row corresponds to its unique coefficient
+
+```
+
+```{r}
+ggplot(data = coefficients_melted, aes(x = Predictor, y = value, color = variable, group = variable)) +            #Plotting the graph
+  geom_line() +
+  geom_point(size = 3) +
+  labs(title = "Coefficients of Logistic Regression over 10 years",
+       x = "Features",
+       y = "Coefficients",
+       color = "Model") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```

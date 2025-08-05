@@ -1,0 +1,145 @@
+---
+title: "R code for Part 1"
+author: ''
+date: "2024-01-17"
+---
+
+# SRN: 
+
+## ST2195 Coursework Part 1(a) R code
+
+### Writing down the probability density function
+```{r}
+target <- function(x) {    
+  (0.5*exp(-abs(x)))
+}
+```
+
+### Initiating values
+```{r}
+x0 <- 0                    # initial value
+N <- 10000                 # number of iterations
+s <- 1                     # standard deviation
+```
+
+### generated_x refers to the generated numeric xN values
+```{r}
+generated_x <- numeric(N)
+generated_x[1] <- x0
+```
+
+### Applying the random walk Metropolis algorithm using the equivalent criterion
+### random_x refers to random number xstar, which is simulated using rnorm()
+### runif() is used to generate random number u from a uniform distribution
+### an if else structure is then used to set
+```{r}
+for (i in 2:N) {
+  random_x <- rnorm(1, mean = generated_x[i-1], s = s)
+  log_ratio <- log(target(random_x)) - log(target(generated_x[i-1]))
+  u <- runif(n = 1, min = 0, max = 1)
+  if (log(u) < log_ratio) {           
+    generated_x[i] <- random_x
+  } else {
+    generated_x[i] <- generated_x[i-1]
+  } 
+}
+```
+
+### Constructing graphs
+### Histogram (in red) is first generated, followed by adding the Kernel Density Plot (in blue)
+### The Probability Density Function (in black) and legend is then added
+```{r}
+hist(generated_x, breaks = 30, freq = FALSE, col= "red", ylim = c(0,0.6), xlab = "values of x", main = "Histogram of generated values") 
+lines(density(generated_x), lwd = 2, col = "blue")
+x_values <- seq(from = -10, to = 10)
+lines(x_values, 0.5*exp(-abs(x_values)), lty= 7, col = "black")
+legend("topright", legend = c("Histogram", "Kernel Density Plot", "Probability Density Function"), fill = c("red", "blue", "black"))
+```
+
+### Reporting the Monte Carlo estimates of the mean and standard deviation
+```{r}
+MC_estimates_of_mean <- mean(generated_x)
+MC_estimates_of_sd <- sd(generated_x)
+print(MC_estimates_of_mean)
+print(MC_estimates_of_sd)
+```
+
+
+
+## ST2195 Coursework Part 1(b) R code
+### Calculating for s = 0.001
+```{r}
+N <- 2000            
+J <- 4
+s <- 0.001
+```
+
+```{r}
+algorithm <- function(N, s, initial_values) {
+  generated_x <- numeric(N)
+  generated_x[1] <- initial_values
+  
+  for (i in 2:N) {
+    random_x <- rnorm(1, mean = generated_x[i-1], sd = s)
+    log_ratio <- log(target(random_x)) - log(target(generated_x[i-1]))
+    u <- runif(n = 1, min = 0, max = 1)
+    if (log(u) < log_ratio) {           
+    generated_x[i] <- random_x
+  } else {
+    generated_x[i] <- generated_x[i-1]
+  } 
+}
+  
+return(generated_x)
+}
+
+chains <- matrix(NA, nrow = N, ncol = J)
+for (j in 1:J) {
+  initial_values <- rnorm(1)
+  chains[, j] <- algorithm(N, s, initial_values)
+}
+```
+
+```{r}
+Mj <- apply(chains, MARGIN = 2, mean)
+Vj <- apply(chains, MARGIN = 2, var)
+W <- mean(Vj)
+M <- mean(Mj)
+B <- var(Mj)
+
+Rhat <- sqrt((B + W) / W)
+print(Rhat)
+```
+
+### Calculating for s values in the interval between 0.001 and 1
+```{r}
+s_values <- seq(from = 0.001, to = 1, length.out = 1000)  
+```
+
+```{r}
+R_hat_ <- function(N, J, s) {
+  chains <- matrix(NA, nrow = N, ncol = J)
+  for (j in 1:J) {
+    initial_values <- rnorm(1)
+    chains[,j] <- algorithm(N, s, initial_values)
+  }
+  
+Mj <- apply(chains, MARGIN = 2, mean)
+Vj <- apply(chains, MARGIN = 2, var)
+W <- mean(Vj)
+M <- mean(Mj)
+B <- var(Mj)
+
+Rhat <- sqrt((B + W) / W)
+
+return(Rhat)
+}
+```
+
+```{r}
+Rhat_values <- sapply(s_values, function(s) R_hat_(N, J, s))
+```
+
+```{r}
+plot(s_values, Rhat_values, type = "l", xlab = "s", ylab = "Rhat", main = "Rhat values over s values")
+```
